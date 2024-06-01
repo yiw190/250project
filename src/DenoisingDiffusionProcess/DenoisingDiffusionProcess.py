@@ -11,7 +11,6 @@ from .forward import *
 from .samplers import *
 from .backbones.unet_convnext import *
 
-
 class DenoisingDiffusionProcess(nn.Module):
     
     def __init__(self,
@@ -19,7 +18,9 @@ class DenoisingDiffusionProcess(nn.Module):
                  loss_fn=F.mse_loss,
                  schedule='linear',
                  num_timesteps=1000,
-                 sampler=None
+                 sampler=None,
+                 use_cfg=False,
+                 cfg_scale=5.0
                 ):
         super().__init__()
         
@@ -27,6 +28,8 @@ class DenoisingDiffusionProcess(nn.Module):
         self.generated_channels=generated_channels
         self.num_timesteps=num_timesteps
         self.loss_fn=loss_fn
+        self.use_cfg = use_cfg
+        self.cfg_scale = cfg_scale
         
         # Forward Process Used for Training
         self.forward_process=GaussianForwardProcess(num_timesteps=self.num_timesteps,
@@ -55,7 +58,7 @@ class DenoisingDiffusionProcess(nn.Module):
         """           
         
         # read dimensions
-        b,c,h,w = batch_size,self.generated_channels,*shape
+        b,c,h,w = batch_size,self.generated_channels,256,256
         device = next(self.model.parameters()).device
         
         # select sampler
@@ -72,29 +75,40 @@ class DenoisingDiffusionProcess(nn.Module):
                 
         for i in tqdm(it, desc='diffusion sampling', total=num_timesteps) if verbose else it:
             t = torch.full((b,), i, device=device, dtype=torch.long)
-            z_t=self.model(x_t,t) # prediction of noise
-            x_t = sampler(x_t,t,z_t) # prediction of next state
+            
+            # prediction of noise
+            if self.use_cfg:
+                z_t_uncond = self.model(x_t, t)
+                z_t_cond = self.model(x_t, t)  # This should be modified to include conditional input if available
+                z_t = z_t_uncond + self.cfg_scale * (z_t_cond - z_t_uncond)
+            else:
+                z_t = self.model(x_t, t)
+                
+            x_t = sampler(x_t, t, z_t) # prediction of next state
             
         return x_t
         
-    def p_loss(self,output):
+    def p_loss(self, output):
         """
             Assumes output is in [-1, +1] range
         """        
         
-        b,c,h,w=output.shape
-        device=output.device
+        b,c,h,w = output.shape
+        device = output.device
         
         # loss for training
         
         # input is the optional condition
         t = torch.randint(0, self.forward_process.num_timesteps, (b,), device=device).long()
-        output_noisy, noise = self.forward_process(output,t,return_noise=True)        
+        output_noisy, noise = self.forward_process(output, t, return_noise=True)        
 
         # reverse pass
-        noise_hat = self.model(output_noisy, t) 
-
-        # TODO begin: apply the loss_fn
-        # Hint: Check the usage of F.mse_loss and review the loss function learned in class
-        return 0
-        # TODO end
+        if self.use_cfg:
+            noise_hat_uncond = self.model(output_noisy, t)
+            noise_hat_cond = self.model(output_noisy, t)  # This should be modified to include conditional input if available
+            noise_hat = noise_hat_uncond + self.cfg_scale * (noise_hat_cond - noise_hat_uncond)
+        else:
+            noise_hat = self.model(output_noisy, t)
+        
+        loss = self.loss_fn(noise, noise_hat)
+        return loss

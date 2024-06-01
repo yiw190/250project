@@ -16,12 +16,12 @@ import os.path
 import warnings
 from typing import Any, Dict, List, Optional
 
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 import torch
-from pytorch_lightning import Callback
-from pytorch_lightning.utilities import rank_zero_warn
-from pytorch_lightning.utilities.exceptions import MisconfigurationException
-from pytorch_lightning.utilities.types import STEP_OUTPUT
+from lightning.pytorch import Callback
+from lightning.pytorch.utilities import rank_zero_warn
+from lightning.pytorch.utilities.exceptions import MisconfigurationException
+from lightning.pytorch.utilities.types import STEP_OUTPUT
 try:
     import amp_C
 
